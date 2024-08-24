@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using BepInEx;
@@ -34,6 +35,8 @@ namespace PRUIil2cpp
 
         public static float scaleRatio = 1f;
         public static MyBehavior Instance;
+        private Dictionary<Scene, Dictionary<Text, Action<Text>>> _textToScale;
+        private Dictionary<Scene, Dictionary<Image, Action<Image>>>  _imageToScale;
         public static void Setup()
         {
             scaleRatio = (16f / 9f) * ((float)Screen.height / Screen.width);
@@ -52,6 +55,8 @@ namespace PRUIil2cpp
             Plugin.Instance.Log.LogInfo("Component Added");
 
             SceneManager.sceneLoaded += (UnityAction<Scene, LoadSceneMode>)OnSceneLoaded;
+            _textToScale = new Dictionary<Scene, Dictionary<Text, Action<Text>>>();
+            _imageToScale = new Dictionary<Scene, Dictionary<Image, Action<Image>>>();
         }
 
         private void Start()
@@ -62,6 +67,40 @@ namespace PRUIil2cpp
             }
         }
 
+        private void Update()
+        {
+
+            foreach(var scene in _textToScale.Keys.ToList())
+            {
+                if (!scene.isLoaded)
+                {
+                    continue;
+                }
+                foreach (var text in _textToScale[scene].Keys.ToList())
+                {
+                    if (text.text.Length > 0)
+                    {
+                        _textToScale[scene][text].Invoke(text);
+                    }
+                }
+            }
+            foreach(var scene in _textToScale.Keys.ToList())
+            {
+                if (!scene.isLoaded)
+                {
+                    continue;
+                }
+                foreach (var image in _imageToScale[scene].Keys.ToList())
+                {
+                    if ((image.activeSprite.name.Length > 0) && image.gameObject.active)
+                    {
+                        _imageToScale[scene][image].Invoke(image);
+                        _imageToScale[scene].Remove(image);
+                    }
+                }
+            }
+        }
+
         void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             HandleScene(scene);
@@ -69,11 +108,13 @@ namespace PRUIil2cpp
 
         private static void Log(string message)
         {
-            Plugin.Instance.Log.LogInfo(message);
+            // Plugin.Instance.Log.LogInfo(message);
         }
 
         void HandleScene(Scene scene)
         {
+            _textToScale[scene] = new Dictionary<Text, Action<Text>>();
+            _imageToScale[scene] = new Dictionary<Image, Action<Image>>();
             Log($"Handling {scene.name} for {scaleRatio}");
             switch (scene.name)
             {
@@ -99,7 +140,7 @@ namespace PRUIil2cpp
             foreach (var child in rootObjects)
             {
                 child.transform.localScale = new Vector3(1, scaleRatio, 1);
-                ScalerHelper(child.transform);
+                ScalerHelper(scene,child.transform);
                 Plugin.Instance.Log.LogInfo($"Scaled {child.name}");
             }
 
@@ -122,7 +163,7 @@ namespace PRUIil2cpp
                     {
                         var grandchild = child.GetChild(0);
                         grandchild.transform.localScale = new Vector3(1, scaleRatio, 1);
-                        ScalerHelper(grandchild.transform);
+                        ScalerHelper(scene,grandchild.transform);
                         Plugin.Instance.Log.LogInfo($"Scaled {grandchild.name}");
                     }
                 }
@@ -131,34 +172,60 @@ namespace PRUIil2cpp
             yield return null;
         }
 
-        public void ScalerHelper(Transform child)
+        public void ScalerHelper(Scene scene,Transform child)
         {
             for (var i = 0; i < child.transform.childCount; i++)
             {
-                ScalerHelper(child.transform.GetChild(i));
+                ScalerHelper(scene,child.transform.GetChild(i));
             }
 
             var text = child.GetComponent<Text>();
             if (!(text is null))
             {
-                child.localScale = new Vector3(1, 1/scaleRatio, 1);
-
-                if (text.fontSize < 27)
-                {
-                    text.resizeTextMaxSize = (int)(text.fontSize * scaleRatio);
-                    text.fontSize = (int)(text.fontSize * scaleRatio);
-                    text.verticalOverflow = VerticalWrapMode.Overflow;
-                }
+                Log($"Scaling text {text.text}");
+                _textToScale[scene].Add(text,TextScale);
             }
 
-            // var image = child.GetComponent<Image>();
-            // if (!(image is null) && !(image.activeSprite is null))
-            // {
-            //     if(!(image.activeSprite.name.Contains("UI_Default")) || child.name.Contains("Icon"))
-            //     {
-            //         child.localScale = new Vector3(scaleRatio, 1, 1);
-            //     }
-            // }
+            var image = child.GetComponent<Image>();
+            if (!(image is null) && !(image.activeSprite is null))
+            {
+                _imageToScale[scene].Add(image,SpriteScale);
+            }
+        }
+
+        private void TextScale(Text text)
+        {
+            text.transform.localScale = new Vector3(1, 1/scaleRatio, 1);
+
+            if (text.fontSize < 27)
+            {
+                text.resizeTextMaxSize = (int)(text.fontSize * scaleRatio);
+                text.fontSize = (int)(text.fontSize * scaleRatio);
+                text.verticalOverflow = VerticalWrapMode.Overflow;
+            }
+        }
+
+
+        private void SpriteScale(Image image)
+        {
+            var spriteTrans = image.transform;
+            Log($"Scaling sprite {image.activeSprite.name}?");
+            if ((!(image.activeSprite.name.Contains("Common") || spriteTrans.name.Contains("Viewport")) ||
+                 spriteTrans.name.Contains("Icon")))
+            {
+                Log($"Yes");
+                spriteTrans.localScale = new Vector3(scaleRatio * spriteTrans.localScale.x, 1, 1);
+
+                for (var i = 0; i < spriteTrans.transform.childCount; i++)
+                {
+                    var grandchild = spriteTrans.GetChild(i);
+                    grandchild.localScale = new Vector3(grandchild.localScale.x/scaleRatio, 1, 1);
+                }
+            }
+            else
+            {
+                Log($"No");
+            }
         }
 
     }

@@ -1,4 +1,4 @@
-namespace PRUIil2cpp
+namespace PRUIScaler
 {
     public static class PluginInfo
     {
